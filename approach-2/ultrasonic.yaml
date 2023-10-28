@@ -1,0 +1,217 @@
+esphome:
+  name: baby-bed-move-detector
+  friendly_name: baby-bed-move-detector
+  
+esp8266:
+  board: esp01_1m
+
+# Enable logging
+logger:
+    level: INFO
+
+web_server:
+  port: 80
+  
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "+vWN6Zu+Q9T8Ld9yAhjsesNe0iJMsYT7ZCfWocdBVQM="
+
+ota:
+  password: "da2086ea9b66d498385002496346209f"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Baby-Bed-Move-Detector"
+    password: "RVc2kXcrHnGg"
+
+captive_portal:
+
+text_sensor:
+  - platform: template
+    name: "Baby Sleeping"
+    id: output_baby_in_cradle
+    update_interval: never
+
+  - platform: template
+    name: "Sleep Start Time"
+    id: sleep_start_time
+    update_interval: never
+
+  - platform: template
+    name: "Duration"
+    id: sleep_duration
+    update_interval: never
+
+binary_sensor:
+  - platform: template
+    name: "Baby Sleeping"
+    id: moving
+    device_class: motion
+
+time:
+  - platform: sntp
+    id: sntp_time
+
+sensor:
+  - platform: duty_time
+    id: sleep_time
+    name: Sleep Time
+    sensor: moving
+
+  - platform: ultrasonic
+    trigger_pin: 0
+    echo_pin: 4
+    name: distance
+    update_interval: 100ms
+    unit_of_measurement: cm
+    #accuracy_decimals: 2
+    filters:
+      - multiply: 100
+      #- filter_out: nan
+      #- delta : 0.05
+      - sliding_window_moving_average:
+          window_size: 100
+          send_every: 100
+          send_first_at: 100
+      
+    on_raw_value:
+      then:
+        lambda: |-
+          static auto start_time = id(sntp_time).now();
+          static auto  last_start_time     = id(sntp_time).now();
+          static bool  has_last_start_time = false;
+          static int   start_time_timeout  = 10 * 60; //minutes
+          static int   distance_window   = 0;
+          static int   nan_counter       = 0;
+          static float distance_max      = 0.0;
+          static float distance_min      = 0.0;
+          static float previous_distance = 0.0;
+          static int idle_timeout = 3;
+          static int idle_timer   = 0;
+          static int sleeping_timeout = 3;
+          static int sleeping_timer   = 0;
+          // ESP_LOGI("INFO", "The value is %f", x);
+          /* It is not possible to shake more than 40cm. Discart current value. */
+          float is_value_valid = distance_max - distance_min < 0.4;
+          if (!is_value_valid) {
+            // ESP_LOGI("INFO", "The value has been discarded due to invalid read");
+            // return;
+          }
+          ESP_LOGI("INFO", "The value is %f", x);
+          
+          if (distance_window++ > 100)
+          {
+            distance_window = 0;
+            
+            ESP_LOGI("INFO", "The value of sensor is: max: %f min: %f diff: %f", distance_max, distance_min, distance_max - distance_min);
+            float is_moving     = distance_max - distance_min > 0.1;
+            bool is_value_valid = nan_counter < 70;
+            nan_counter         = 0;
+            if (is_moving && is_value_valid) {
+              // Icrease sleeping timer
+              sleeping_timer++;
+              // Did we wait enough to change status?
+              if (sleeping_timer >= sleeping_timeout) {
+                // Change status to idle
+                id(output_baby_in_cradle).publish_state("Sleeping");
+                id(moving).publish_state(true);
+                auto now = id(sntp_time).now();
+                // Is first time to initialize?
+                if (!has_last_start_time) {
+                  ESP_LOGI("INFO", "New session started");
+                  has_last_start_time = true;
+                  last_start_time     = now;
+                  start_time          = now;
+                } else {
+                  // The system had a session but is it expired?
+                  bool is_session_expired = now.timestamp - last_start_time.timestamp > start_time_timeout;
+                  last_start_time         = now;
+                  if (is_session_expired) {
+                    ESP_LOGI("INFO", "Session expxired, new session started");
+                    start_time = now;
+                  } else {
+                    ESP_LOGI("INFO", "Session restored or continued");
+                  }
+                }
+                // Current time
+                id(sleep_start_time).publish_state(start_time.strftime("%H:%M"));
+                time_t duration = (time_t) now.timestamp - start_time.timestamp;
+                char duration_as_str[17];
+  
+                int hours_elapsed = duration / 3600;
+                int minutes_elapsed = (duration % 3600) / 60;
+                int seconds_elapsed = duration % 60;
+
+                sprintf(duration_as_str, "%02i:%02i:%02i", hours_elapsed, minutes_elapsed, seconds_elapsed);
+
+                // Sleep Duration
+                ESP_LOGI("INFO", "Sleep duration: %s", duration_as_str);
+
+                id(sleep_duration).publish_state(duration_as_str);
+                
+                // Reset all states
+                sleeping_timer = 0;
+                idle_timer = 0;
+                previous_distance = 0.0;
+              }
+
+            } else {
+              // Icrease idle timer
+              idle_timer++;
+
+              // Did we wait enough to change status?
+              if (idle_timer >= idle_timeout) {
+
+                // Change status to idle
+                id(output_baby_in_cradle).publish_state("Idle");
+                id(moving).publish_state(false);
+
+                id(sleep_start_time).publish_state("N/A");
+                
+                // Reset all states
+                sleeping_timer = 0;
+                idle_timer = 0;
+                previous_distance = 0.0;
+              }
+            }
+          }
+          
+          if (isnan(x)) {
+            x = previous_distance;
+          }
+
+          // If the distance more than 50 cm, set to 50 cm
+          //if (x > 0.5) {
+          //  x = 0.5;
+          //}
+
+          previous_distance = x;
+
+          if (distance_window == 1)
+          {
+            distance_max = x;
+            distance_min = x;
+          }
+          else
+          {
+            if (x > distance_max)
+            {
+              distance_max = x;
+            }
+            if (x < distance_min)
+            {
+              distance_min = x;
+            }
+          }
+
+  - platform: uptime
+    name: "Uptime"
+  
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
