@@ -13,8 +13,8 @@ async function createWidget(items) {
   req.headers = { "Authorization": "Bearer LONG_LIVED_ACCESS_TOKEN", "content-type": "application/json" };
   let json = await req.loadJSON();
   var status = "N/A";
-  var start_time = "";
-  var duration = "";
+  var start_time = "N/A";
+  var duration = "N/A";
 
   for (var i = 0; i < json.length; i++) {
     if (json[i]['entity_id'] == "baby.sleeping") {
