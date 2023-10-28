@@ -1,0 +1,11 @@
+name: "Baby Sleep Tracker"
+description: "Track your baby sleep times!"
+version: "1.0.4"
+slug: "baby_sleep_tracker"
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
