@@ -1,0 +1,51 @@
+esphome:
+  name: vibration_test
+  friendly_name: vibration_test
+
+esp8266:
+  board: esp01_1m
+
+# Enable logging
+logger:
+web_server:
+  port: 80
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "r4Lic9LOwYNBrDj8w2E2rOlnkfwVf7x9qgDsEH8YODg="
+
+ota:
+  password: "d90203ec782f13da794ab9b729051c2a"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Test Fallback Hotspot"
+    password: "oweH1F2KTtO9"
+
+captive_portal:
+
+time:
+  - platform: sntp
+    id: baby_bed_time
+
+sensor:
+  - platform: uptime
+    name: "Uptime baby bed"
+  - platform: wifi_signal
+    name: "WiFi Signal at baby bed"
+    update_interval: 60s
+
+binary_sensor:
+  - platform: gpio
+    name: "BabyBed"
+    id: "BabyBed"
+    device_class: vibration
+    filters:
+      delayed_on_off: 10s
+    pin: 
+      number: 0
+      mode: INPUT
